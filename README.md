@@ -1,3 +1,5 @@
+该项目已经转为maven项目
+
 ### DEBUG启动Tomcat源码--操作步骤
 在Eclipse 中的 Debug Configurations 中加入一个启动 Tomcat 的 Appliction. <br>
 具体在 Java Application 中加入Main启动项，选择刚才导入的 Tomcat 7.0项目，<br>
