@@ -17,6 +17,15 @@
 
 package org.apache.tomcat.util.net;
 
+import org.apache.juli.logging.Log;
+import org.apache.juli.logging.LogFactory;
+import org.apache.tomcat.util.ExceptionUtils;
+import org.apache.tomcat.util.IntrospectionUtils;
+import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
+import org.apache.tomcat.util.net.SecureNioChannel.ApplicationBufferHandler;
+import org.apache.tomcat.util.net.jsse.NioX509KeyManager;
+
+import javax.net.ssl.*;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -25,13 +34,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
-import java.nio.channels.CancelledKeyException;
-import java.nio.channels.FileChannel;
-import java.nio.channels.SelectionKey;
-import java.nio.channels.Selector;
-import java.nio.channels.ServerSocketChannel;
-import java.nio.channels.SocketChannel;
-import java.nio.channels.WritableByteChannel;
+import java.nio.channels.*;
 import java.util.Iterator;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -40,20 +43,6 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-
-import javax.net.ssl.KeyManager;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLEngine;
-import javax.net.ssl.SSLSessionContext;
-import javax.net.ssl.X509KeyManager;
-
-import org.apache.juli.logging.Log;
-import org.apache.juli.logging.LogFactory;
-import org.apache.tomcat.util.ExceptionUtils;
-import org.apache.tomcat.util.IntrospectionUtils;
-import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
-import org.apache.tomcat.util.net.SecureNioChannel.ApplicationBufferHandler;
-import org.apache.tomcat.util.net.jsse.NioX509KeyManager;
 
 /**
  * NIO tailored thread pool, providing the following services:
@@ -784,7 +773,7 @@ public class NioEndpoint extends AbstractEndpoint {
 
                 try {
                     //if we have reached max connections, wait
-                    countUpOrAwaitConnection();
+                    countUpOrAwaitConnection();  //增减闭锁的计数，如果connection数量已经达到了最大，那么暂停一下，这里用到的是connectionLimitLatch锁，可以理解为一个闭锁吧
 
                     SocketChannel socket = null;
                     try {
@@ -793,7 +782,7 @@ public class NioEndpoint extends AbstractEndpoint {
                         socket = serverSock.accept();
                     } catch (IOException ioe) {
                         //we didn't get a socket
-                        countDownConnection();
+                        countDownConnection(); //出了异常，并没有获取链接，那么这里减少闭锁的计数
                         // Introduce delay if necessary
                         errorDelay = handleExceptionWithDelay(errorDelay);
                         // re-throw
@@ -805,9 +794,9 @@ public class NioEndpoint extends AbstractEndpoint {
                     // setSocketOptions() will add channel to the poller
                     // if successful
                     if (running && !paused) {
-                        if (!setSocketOptions(socket)) {
-                            countDownConnection();
-                            closeSocket(socket);
+                        if (!setSocketOptions(socket)) { //这里主要是将socket加入到poller对象上面去，而且还要设置参数
+                            countDownConnection(); //加入poller对象失败了的话，那么将闭锁的计数减低
+                            closeSocket(socket); //关闭刚刚 创建的这个socket
                         }
                     } else {
                         countDownConnection();
